@@ -1,0 +1,10 @@
+.git
+.github
+.gitignore
+*.md
+LICENSE
+k8s/
+data/
+universe/
+backups/
+logs/

@@ -1,0 +1,25 @@
+# Game assets and binary distribution (proprietary / large files)
+Assets.zip
+Server/
+*.jar
+*.aot
+*.aot.config
+
+# Runtime persistent storage
+data/
+universe/
+backups/
+logs/
+config.json
+auth.enc
+auth.key
+permissions.json
+
+# Credentials and state files
+.hytale-downloader-credentials.json
+.installed-version
+
+# Local environment and override files
+.env
+jvm.options
+*.tar
