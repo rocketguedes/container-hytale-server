@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-PORT="${1:-5520}"
+PORT="${1:-${HYTALE_PORT:-5520}}"
 
 case "${PORT}" in
     ''|*[!0-9]*) exit 1 ;;

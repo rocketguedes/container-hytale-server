@@ -9,20 +9,14 @@ case "${1:-}" in
     server)  MODE="server";  shift ;;
 esac
 
-DATA_DIR="/data"
-INSTALL_DIR="${DATA_DIR}/.install"
+DATA_DIR="${DATA_DIR:-/data}"
+INSTALL_DIR="${INSTALL_DIR:-${DATA_DIR}/.install}"
 STAGE_DIR="${INSTALL_DIR}/.staging"
 TMP_DIR="${TMPDIR:-/tmp}"
-SERVER_JAR="${INSTALL_DIR}/Server/HytaleServer.jar"
-ASSETS_ZIP="${INSTALL_DIR}/Assets.zip"
+SERVER_JAR="${SERVER_JAR:-${INSTALL_DIR}/Server/HytaleServer.jar}"
+ASSETS_ZIP="${ASSETS_ZIP:-${INSTALL_DIR}/Assets.zip}"
 PATCHLINE="${PATCHLINE:-release}"
-MAVEN_URL="https://maven.hytale.com/${PATCHLINE}/com/hypixel/hytale/Server"
-
-if [ ! -w "${DATA_DIR}" ]; then
-    err "'${DATA_DIR}' is not writable by $(id -u):$(id -g)"
-    exit 1
-fi
-mkdir -p "${DATA_DIR}/backups" "${DATA_DIR}/logs" "${DATA_DIR}/mods" "${DATA_DIR}/telemetry" 2>/dev/null || true
+MAVEN_URL="${MAVEN_URL:-https://maven.hytale.com/${PATCHLINE}/com/hypixel/hytale/Server}"
 
 jar_version() {
     local jar="${1:-${SERVER_JAR}}"
@@ -37,32 +31,21 @@ latest_version() {
 }
 
 commit_staged_install() {
-    local f
-    for f in "${STAGE_DIR}/Server/auth.enc" "${STAGE_DIR}/auth.enc"; do
-        if [ -s "${f}" ]; then
-            cp -f "${f}" "${DATA_DIR}/.auth.enc.tmp"
-            chmod 0600 "${DATA_DIR}/.auth.enc.tmp" 2>/dev/null || true
-            mv -f "${DATA_DIR}/.auth.enc.tmp" "${DATA_DIR}/auth.enc"
-            break
-        fi
-    done
-
-    if [ -z "${HYTALE_AUTH_KEY_FILE:-}" ] && [ -z "${HYTALE_AUTH_KEY:-}" ] && [ ! -s "${DATA_DIR}/auth.key" ]; then
-        for f in "${STAGE_DIR}/Server/auth.key" "${STAGE_DIR}/auth.key"; do
-            if [ -s "${f}" ]; then
-                cp -f "${f}" "${DATA_DIR}/.auth.key.tmp"
-                chmod 0600 "${DATA_DIR}/.auth.key.tmp" 2>/dev/null || true
-                mv -f "${DATA_DIR}/.auth.key.tmp" "${DATA_DIR}/auth.key"
-                break
-            fi
-        done
+    [ -s "${STAGE_DIR}/auth.enc" ] && cp -f "${STAGE_DIR}/auth.enc" "${DATA_DIR}/auth.enc"
+    if [ -s "${STAGE_DIR}/auth.key" ] && [ ! -s "${DATA_DIR}/auth.key" ]; then
+        cp -f "${STAGE_DIR}/auth.key" "${DATA_DIR}/auth.key"
+    fi
+    if [ -s "${STAGE_DIR}/config.json" ] && [ ! -s "${DATA_DIR}/config.json" ]; then
+        cp -f "${STAGE_DIR}/config.json" "${DATA_DIR}/config.json"
     fi
 
-    mkdir -p "${INSTALL_DIR}/Server"
+    local server_dir
+    server_dir="$(dirname "${SERVER_JAR}")"
+    mkdir -p "${server_dir}" "$(dirname "${ASSETS_ZIP}")"
     mv -f "${STAGE_DIR}/Server/HytaleServer.jar" "${SERVER_JAR}"
     if [ -d "${STAGE_DIR}/Server/Licenses" ]; then
-        rm -rf "${INSTALL_DIR}/Server/Licenses"
-        mv "${STAGE_DIR}/Server/Licenses" "${INSTALL_DIR}/Server/Licenses"
+        rm -rf "${server_dir}/Licenses"
+        mv "${STAGE_DIR}/Server/Licenses" "${server_dir}/Licenses"
     fi
     mv -f "${STAGE_DIR}/Assets.zip" "${ASSETS_ZIP}"
     rm -rf "${STAGE_DIR}"
@@ -87,18 +70,23 @@ bootstrap_version() {
         return 1
     fi
 
-    local -a boot_args=("--bootstrap" "--disable-sentry")
-    local prev="" arg
-    for arg in "$@"; do
-        if [ "${prev}" = "--owner-uuid" ]; then
-            boot_args+=("--owner-uuid" "${arg}")
-            prev=""
-        elif [[ "${arg}" == --owner-uuid=* ]]; then
-            boot_args+=("${arg}")
-        else
-            prev="${arg}"
-        fi
-    done
+    local -a boot_args=("--bootstrap")
+    if [ "${MODE}" = "install" ]; then
+        boot_args+=("$@")
+    else
+        local skip_next=0 arg
+        for arg in "$@"; do
+            if [ "${skip_next}" -eq 1 ]; then
+                skip_next=0
+                continue
+            fi
+            case "${arg}" in
+                --boot-command|--assets) skip_next=1 ;;
+                --boot-command=*|--assets=*) ;;
+                *) boot_args+=("${arg}") ;;
+            esac
+        done
+    fi
 
     # Workaround Hytale 0.7.5 --bootstrap IOException when permissions.json is absent
     rm -rf "${STAGE_DIR}"
@@ -112,7 +100,7 @@ bootstrap_version() {
 
         (
             cd "${STAGE_DIR}"
-            env -u HYTALE_DISABLE_UPDATES java -Djava.io.tmpdir="${TMP_DIR}" -Xms128M -Xmx512M -jar "${jar}" \
+            env -u HYTALE_DISABLE_UPDATES java -jar "${jar}" \
                 "${boot_args[@]}" \
                 --boot-command "update download" \
                 --boot-command "stop"
@@ -136,7 +124,7 @@ bootstrap_version() {
 
     (
         cd "${STAGE_DIR}"
-        exec env -u HYTALE_DISABLE_UPDATES java -Djava.io.tmpdir="${TMP_DIR}" -Xms128M -Xmx512M -jar "${jar}" \
+        exec env -u HYTALE_DISABLE_UPDATES java -jar "${jar}" \
             "${boot_args[@]}" \
             --boot-command "auth persistence Encrypted" \
             --boot-command "auth login device"
@@ -204,9 +192,8 @@ if [ ! -s "${SERVER_JAR}" ] || [ ! -s "${ASSETS_ZIP}" ]; then
     exit 1
 fi
 
-if [ -s "${DATA_DIR}/auth.enc" ] && [ ! -s "${DATA_DIR}/config.json" ]; then
-    printf '{"AuthCredentialStore":{"Type":"Encrypted","Path":"auth.enc"}}\n' > "${DATA_DIR}/config.json"
-fi
-
 cd "${DATA_DIR}"
-exec java -Djava.io.tmpdir="${TMP_DIR}" -jar "${SERVER_JAR}" --assets "${ASSETS_ZIP}" "$@"
+case " $* " in
+    *" --assets "*|*" --assets="*) exec java -jar "${SERVER_JAR}" "$@" ;;
+    *) exec java -jar "${SERVER_JAR}" --assets "${ASSETS_ZIP}" "$@" ;;
+esac
