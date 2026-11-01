@@ -18,7 +18,8 @@ RUN userdel -r ubuntu 2>/dev/null || true \
     && groupadd --gid "${GID}" "${USER}" \
     && useradd --uid "${UID}" --gid "${GID}" --home-dir /data --no-create-home --shell /usr/sbin/nologin "${USER}" \
     && mkdir -p /data \
-    && chown "${UID}:${GID}" /data
+    && chown "${UID}:${GID}" /data \
+    && chmod 775 /data
 
 COPY --chmod=0755 entrypoint.sh /entrypoint.sh
 COPY --chmod=0755 healthcheck.sh /healthcheck.sh
@@ -27,14 +28,13 @@ ENV HOME="/data"
 
 USER ${UID}:${GID}
 
-VOLUME ["/data"]
 WORKDIR /data
 
 EXPOSE 5520/udp
 
 STOPSIGNAL SIGTERM
 
-HEALTHCHECK --interval=15s --timeout=3s --start-period=60s --retries=3 CMD ["/healthcheck.sh"]
+HEALTHCHECK --interval=15s --timeout=3s --start-period=180s --retries=3 CMD ["/healthcheck.sh"]
 
 ENTRYPOINT ["/usr/bin/tini", "-g", "-e", "143", "--", "/entrypoint.sh"]
 CMD []

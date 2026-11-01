@@ -3,6 +3,12 @@ set -euo pipefail
 
 err() { printf 'error: %s\n' "$*" >&2; }
 
+# Allow running arbitrary system commands (e.g. bash, sh, debugging utilities)
+# following standard OCI / Docker Official Images entrypoint conventions.
+if [ "$#" -gt 0 ] && [ "${1#-}" = "$1" ] && [ "$1" != "install" ] && [ "$1" != "server" ]; then
+    exec "$@"
+fi
+
 MODE="all"
 case "${1:-}" in
     install) MODE="install"; shift ;;
@@ -31,12 +37,19 @@ latest_version() {
 }
 
 commit_staged_install() {
-    [ -s "${STAGE_DIR}/auth.enc" ] && cp -f "${STAGE_DIR}/auth.enc" "${DATA_DIR}/auth.enc"
-    if [ -s "${STAGE_DIR}/auth.key" ] && [ ! -s "${DATA_DIR}/auth.key" ]; then
-        cp -f "${STAGE_DIR}/auth.key" "${DATA_DIR}/auth.key"
+    local f
+    for f in "${STAGE_DIR}/Server/auth.enc" "${STAGE_DIR}/auth.enc"; do
+        [ -s "${f}" ] && { cp -f "${f}" "${DATA_DIR}/auth.enc"; break; }
+    done
+    if [ ! -s "${DATA_DIR}/auth.key" ]; then
+        for f in "${STAGE_DIR}/Server/auth.key" "${STAGE_DIR}/auth.key"; do
+            [ -s "${f}" ] && { cp -f "${f}" "${DATA_DIR}/auth.key"; break; }
+        done
     fi
-    if [ -s "${STAGE_DIR}/config.json" ] && [ ! -s "${DATA_DIR}/config.json" ]; then
-        cp -f "${STAGE_DIR}/config.json" "${DATA_DIR}/config.json"
+    if [ ! -s "${DATA_DIR}/config.json" ]; then
+        for f in "${STAGE_DIR}/Server/config.json" "${STAGE_DIR}/config.json"; do
+            [ -s "${f}" ] && { cp -f "${f}" "${DATA_DIR}/config.json"; break; }
+        done
     fi
 
     local server_dir
@@ -57,8 +70,8 @@ bootstrap_version() {
     local jar="${TMP_DIR}/hytale-bootstrap.jar"
     local url="${MAVEN_URL}/${version}/Server-${version}.jar"
 
-    curl -fsSL --retry 3 --connect-timeout 10 "${url}.sha1" -o "${jar}.sha1" || return 1
-    curl -fsSL --retry 3 --connect-timeout 10 "${url}" -o "${jar}" || { rm -f "${jar}" "${jar}.sha1"; return 1; }
+    curl -fsSL --retry 3 --connect-timeout 10 --max-time 15 "${url}.sha1" -o "${jar}.sha1" || return 1
+    curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 "${url}" -o "${jar}" || { rm -f "${jar}" "${jar}.sha1"; return 1; }
 
     local expected actual
     expected=$(awk '{print tolower($1)}' "${jar}.sha1" | tr -d '\r\n')
